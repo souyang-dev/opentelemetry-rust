@@ -39,6 +39,10 @@ where
             value: T::new_atomic_tracker(self.value.get_and_reset_value()),
         }
     }
+
+    fn merge_to(&self, target: &Self) {
+        target.value.store(self.value.get_value());
+    }
 }
 
 /// Summarizes a set of measurements as the last one made.

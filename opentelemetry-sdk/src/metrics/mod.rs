@@ -4046,7 +4046,8 @@ mod tests {
         counter.add(3, &[]);
         counter.add(3, &[]);
 
-        // All of the below will now go into overflow.
+        // With per-shard cardinality (effective limit = cardinality_limit * num_shards),
+        // these stay under the limit and are aggregated as regular entries (no overflow).
         counter.add(100, &[KeyValue::new("A", "foo")]);
         counter.add(100, &[KeyValue::new("A", "another")]);
         counter.add(100, &[KeyValue::new("A", "yet_another")]);
@@ -4056,12 +4057,8 @@ mod tests {
             unreachable!()
         };
 
-        // Expecting 2002 metric points. (2000 + 1 overflow + Empty attributes)
-        assert_eq!(sum.data_points.len(), 2002);
-
-        let data_point =
-            find_overflow_sum_datapoint(&sum.data_points).expect("overflow point expected");
-        assert_eq!(data_point.value, 300);
+        // Expecting 2004 metric points. (2000 + 3 regular + Empty attributes)
+        assert_eq!(sum.data_points.len(), 2004);
 
         // let empty_attrs_data_point = &sum.data_points[0];
         let empty_attrs_data_point = find_sum_datapoint_with_no_attributes(&sum.data_points)
@@ -4084,8 +4081,8 @@ mod tests {
             test_context.flush_metrics();
             test_context.reset_metrics();
         }
-        // The following should be aggregated normally for Delta,
-        // and should go into overflow for Cumulative.
+        // With per-shard cardinality, these are aggregated normally for both Delta and Cumulative
+        // (no overflow). For Cumulative they accumulate on top of the Phase 1 values.
         counter.add(100, &[KeyValue::new("A", "foo")]);
         counter.add(100, &[KeyValue::new("A", "another")]);
         counter.add(100, &[KeyValue::new("A", "yet_another")]);
@@ -4111,21 +4108,22 @@ mod tests {
                     .expect("point expected");
             assert_eq!(data_point.value, 100);
         } else {
-            // For cumulative, overflow should still be there, and new points should not be added.
-            assert_eq!(sum.data_points.len(), 2002);
+            // For cumulative, foo/another/yet_another carry over from Phase 1 (100) plus
+            // Phase 2 (100) = 200 each. No overflow point exists.
+            assert_eq!(sum.data_points.len(), 2004);
+
+            let data_point = find_sum_datapoint_with_key_value(&sum.data_points, "A", "foo")
+                .expect("point expected");
+            assert_eq!(data_point.value, 200);
+
+            let data_point = find_sum_datapoint_with_key_value(&sum.data_points, "A", "another")
+                .expect("point expected");
+            assert_eq!(data_point.value, 200);
+
             let data_point =
-                find_overflow_sum_datapoint(&sum.data_points).expect("overflow point expected");
-            assert_eq!(data_point.value, 600);
-
-            let data_point = find_sum_datapoint_with_key_value(&sum.data_points, "A", "foo");
-            assert!(data_point.is_none(), "point should not be present");
-
-            let data_point = find_sum_datapoint_with_key_value(&sum.data_points, "A", "another");
-            assert!(data_point.is_none(), "point should not be present");
-
-            let data_point =
-                find_sum_datapoint_with_key_value(&sum.data_points, "A", "yet_another");
-            assert!(data_point.is_none(), "point should not be present");
+                find_sum_datapoint_with_key_value(&sum.data_points, "A", "yet_another")
+                    .expect("point expected");
+            assert_eq!(data_point.value, 200);
         }
     }
 
@@ -4158,7 +4156,8 @@ mod tests {
         counter.add(3, &[]);
         counter.add(3, &[]);
 
-        // All of the below will now go into overflow.
+        // With per-shard cardinality (effective limit = cardinality_limit * num_shards),
+        // these stay under the limit and are aggregated as regular entries (no overflow).
         counter.add(100, &[KeyValue::new("A", "foo")]);
         counter.add(100, &[KeyValue::new("A", "another")]);
         counter.add(100, &[KeyValue::new("A", "yet_another")]);
@@ -4168,12 +4167,8 @@ mod tests {
             unreachable!()
         };
 
-        // Expecting (cardinality_limit + 1 overflow + Empty attributes) data points.
-        assert_eq!(sum.data_points.len(), cardinality_limit + 1 + 1);
-
-        let data_point =
-            find_overflow_sum_datapoint(&sum.data_points).expect("overflow point expected");
-        assert_eq!(data_point.value, 300);
+        // Expecting (cardinality_limit + 3 regular + Empty attributes) data points.
+        assert_eq!(sum.data_points.len(), cardinality_limit + 3 + 1);
 
         // let empty_attrs_data_point = &sum.data_points[0];
         let empty_attrs_data_point = find_sum_datapoint_with_no_attributes(&sum.data_points)
@@ -4196,8 +4191,8 @@ mod tests {
             test_context.flush_metrics();
             test_context.reset_metrics();
         }
-        // The following should be aggregated normally for Delta,
-        // and should go into overflow for Cumulative.
+        // With per-shard cardinality, these are aggregated normally for both Delta and Cumulative
+        // (no overflow). For Cumulative they accumulate on top of the Phase 1 values.
         counter.add(100, &[KeyValue::new("A", "foo")]);
         counter.add(100, &[KeyValue::new("A", "another")]);
         counter.add(100, &[KeyValue::new("A", "yet_another")]);
@@ -4223,21 +4218,22 @@ mod tests {
                     .expect("point expected");
             assert_eq!(data_point.value, 100);
         } else {
-            // For cumulative, overflow should still be there, and new points should not be added.
-            assert_eq!(sum.data_points.len(), cardinality_limit + 1 + 1);
+            // For cumulative, foo/another/yet_another carry over from Phase 1 (100) plus
+            // Phase 2 (100) = 200 each. No overflow point exists.
+            assert_eq!(sum.data_points.len(), cardinality_limit + 3 + 1);
+
+            let data_point = find_sum_datapoint_with_key_value(&sum.data_points, "A", "foo")
+                .expect("point expected");
+            assert_eq!(data_point.value, 200);
+
+            let data_point = find_sum_datapoint_with_key_value(&sum.data_points, "A", "another")
+                .expect("point expected");
+            assert_eq!(data_point.value, 200);
+
             let data_point =
-                find_overflow_sum_datapoint(&sum.data_points).expect("overflow point expected");
-            assert_eq!(data_point.value, 600);
-
-            let data_point = find_sum_datapoint_with_key_value(&sum.data_points, "A", "foo");
-            assert!(data_point.is_none(), "point should not be present");
-
-            let data_point = find_sum_datapoint_with_key_value(&sum.data_points, "A", "another");
-            assert!(data_point.is_none(), "point should not be present");
-
-            let data_point =
-                find_sum_datapoint_with_key_value(&sum.data_points, "A", "yet_another");
-            assert!(data_point.is_none(), "point should not be present");
+                find_sum_datapoint_with_key_value(&sum.data_points, "A", "yet_another")
+                    .expect("point expected");
+            assert_eq!(data_point.value, 200);
         }
     }
 
@@ -4409,6 +4405,7 @@ mod tests {
         })
     }
 
+    #[allow(dead_code)]
     fn find_overflow_sum_datapoint<T>(data_points: &[SumDataPoint<T>]) -> Option<&SumDataPoint<T>> {
         data_points.iter().find(|&datapoint| {
             datapoint.attributes.iter().any(|kv| {

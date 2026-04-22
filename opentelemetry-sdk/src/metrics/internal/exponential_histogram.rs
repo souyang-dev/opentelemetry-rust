@@ -338,6 +338,68 @@ where
         let cloned = replace(current.deref_mut(), ExpoHistogramDataPoint::new(init));
         Mutex::new(cloned)
     }
+
+    fn merge_to(&self, target: &Self) {
+        let src = self.lock().unwrap_or_else(|err| err.into_inner());
+        let mut dst = target.lock().unwrap_or_else(|err| err.into_inner());
+
+        if src.count == 0 {
+            return;
+        }
+
+        // Assumes src and dst have the same max_size.
+        // The dst is the target of merge. It starts with max scale (finest resolution).
+        // If src is downscaled (smaller scale, coarse resolution) we should use the min scale.
+        dst.scale = dst.scale.min(src.scale);
+        dst.count += src.count;
+        dst.sum += src.sum;
+        dst.zero_count += src.zero_count;
+        if src.min < dst.min {
+            dst.min = src.min;
+        }
+        if src.max > dst.max {
+            dst.max = src.max;
+        }
+
+        merge_expo_buckets(&src.pos_buckets, &mut dst.pos_buckets);
+        merge_expo_buckets(&src.neg_buckets, &mut dst.neg_buckets);
+    }
+}
+
+/// Merges `src` bucket counts into `dst`, aligning by bin index.
+/// Assumes both have the same scale (no downscaling needed).
+fn merge_expo_buckets(src: &ExpoBuckets, dst: &mut ExpoBuckets) {
+    if src.counts.is_empty() {
+        return;
+    }
+
+    if dst.counts.is_empty() {
+        dst.start_bin = src.start_bin;
+        dst.counts = src.counts.clone();
+        return;
+    }
+
+    // Compute the union bin range
+    let src_end = src.start_bin + src.counts.len() as i32 - 1;
+    let dst_end = dst.start_bin + dst.counts.len() as i32 - 1;
+    let new_start = src.start_bin.min(dst.start_bin);
+    let new_end = src_end.max(dst_end);
+    let new_len = (new_end - new_start + 1) as usize;
+
+    // Shift dst counts to align with new_start
+    let dst_offset = (dst.start_bin - new_start) as usize;
+    if dst_offset > 0 || new_len > dst.counts.len() {
+        let mut new_counts = vec![0u64; new_len];
+        new_counts[dst_offset..dst_offset + dst.counts.len()].copy_from_slice(&dst.counts);
+        dst.counts = new_counts;
+        dst.start_bin = new_start;
+    }
+
+    // Add src counts at their aligned offsets
+    let src_offset = (src.start_bin - new_start) as usize;
+    for (i, &c) in src.counts.iter().enumerate() {
+        dst.counts[src_offset + i] += c;
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
